@@ -43,7 +43,6 @@ async def safe_exception_handler(request: Request, exc: Exception):
 
 @app.get("/", include_in_schema=False)
 def home():
-    _run_watch()
     page = _STATIC / "index.html"
     if not page.exists():
         raise FriendlyException("The mill page is not ready yet.", "Try again in a little while.")
