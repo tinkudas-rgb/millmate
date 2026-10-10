@@ -57,7 +57,17 @@ def _today() -> date:
     return date.today()
 
 def _clean_brand_rows() -> list[dict[str, Any]]:
-    return [Brand(**row).dict() for row in db.list_brands()]
+    import math
+    rows = []
+    for row in db.list_brands():
+        try:
+            v = float(row.get("stock_kg", 0))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(v) or abs(v) > 1e9:
+            continue  # a damaged row must never take the whole book down
+        rows.append(Brand(**row).dict())
+    return rows
 
 def _movement_rows(limit: int = 50) -> list[dict[str, Any]]:
     return db.list_movements(limit=limit)
@@ -95,15 +105,45 @@ def _run_watch(refresh: bool = False) -> Advice:
 
 def _after_change() -> None:
     _advice_cache.clear()
-    _run_watch(refresh=True)
+    try:
+        _run_watch(refresh=True)
+    except Exception:  # noqa: BLE001  a change must still save even if advice cannot refresh
+        pass
+
+MAX_KG = 1_000_000.0
+
+def _check_kg(value, what: str, allow_zero: bool = True) -> float:
+    import math
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise FriendlyException(f"{what} does not look right.", "Enter a number of kilograms, such as 500.")
+    if not math.isfinite(v):
+        raise FriendlyException(f"{what} does not look right.", "Enter a number of kilograms, such as 500.")
+    if v < 0 or (v == 0 and not allow_zero):
+        raise FriendlyException(f"{what} cannot be below zero." if v < 0 else f"{what} must be above zero.", "Enter the amount in kilograms, such as 500.")
+    if v > MAX_KG:
+        raise FriendlyException(f"{what} is too large.", "Enter an amount up to 1,000,000 kg.")
+    return v
+
+def _check_text(value: str, what: str, limit: int) -> str:
+    v = (value or "").strip()
+    if len(v) > limit:
+        raise FriendlyException(f"{what} is too long.", f"Use {limit} characters or fewer.")
+    if any(ch in v for ch in "<>") or any(ord(ch) < 32 for ch in v):
+        raise FriendlyException(f"{what} has a character I cannot use.", "Use letters, numbers and spaces.")
+    return v
 
 @app.post("/api/brands", response_model=Brand)
 def add_brand(payload: BrandCreate):
-    name = payload.name.strip()
+    name = _check_text(payload.name, "The brand name", 60)
     if not name:
         raise FriendlyException("A brand name is needed.", "Enter the name printed on the rice bag.")
+    rice_type = _check_text(payload.rice_type, "The rice type", 40)
+    stock = _check_kg(payload.stock_kg, "The starting stock")
+    reorder = None if payload.reorder_level_kg is None else _check_kg(payload.reorder_level_kg, "The reorder level")
     try:
-        row = db.create_brand(name, payload.rice_type.strip() or "Other", payload.stock_kg, payload.reorder_level_kg)
+        row = db.create_brand(name, rice_type or "Other", stock, reorder)
     except ValueError as exc:
         raise FriendlyException("You already have a brand with this name.", "Use a different name, for example add the pack size.") from exc
     _after_change()
@@ -112,6 +152,12 @@ def add_brand(payload: BrandCreate):
 @app.patch("/api/brands/{brand_id}", response_model=Brand)
 def edit_brand(brand_id: str, payload: BrandPatch):
     changes = payload.dict(exclude_unset=True)
+    if "name" in changes and changes["name"] is not None:
+        changes["name"] = _check_text(changes["name"], "The brand name", 60)
+    if "rice_type" in changes and changes["rice_type"] is not None:
+        changes["rice_type"] = _check_text(changes["rice_type"], "The rice type", 40)
+    if changes.get("reorder_level_kg") is not None:
+        changes["reorder_level_kg"] = _check_kg(changes["reorder_level_kg"], "The reorder level")
     for key in ("name", "rice_type"):
         if key in changes and changes[key] is not None:
             changes[key] = changes[key].strip()
@@ -140,8 +186,8 @@ def record_movement(payload: MovementCreate):
         datetime.strptime(movement_date, "%Y-%m-%d")
     except ValueError as exc:
         raise FriendlyException("That date does not look right.", "Use year-month-day, such as 2026-10-10.") from exc
-    if payload.kg <= 0:
-        raise FriendlyException("The amount must be above zero.", "Enter the amount of rice that came in or went out.")
+    _check_kg(payload.kg, "The amount", allow_zero=False)
+    payload.note = _check_text(payload.note, "The note", 200)
     try:
         db.add_movement(payload.brand_id, payload.kind, payload.kg, movement_date, payload.note.strip())
     except KeyError as exc:
