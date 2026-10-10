@@ -80,7 +80,8 @@ def _state_dict() -> dict[str, Any]:
     brands = _clean_brand_rows()
     movements = _movement_rows(50)
     today = _today()
-    facts = _facts(brands, movements, today)
+    # facts must use the same full history the advice uses, so both screens agree
+    facts = _facts(brands, db.list_movements(limit=10000), today)
     return State(brands=brands, movements=movements, facts=facts).dict()
 
 def _signature(brands: list[dict], movements: list[dict], today: date) -> str:
