@@ -79,3 +79,44 @@ def test_plain_words_no_llm_dependency_and_story_not_used_as_evidence():
     banned = r'\b(forecast|model|algorithm|API|CSV|database|dataset|anomaly|KPI|regression|token)\b'
     for action in recommend(f, STORY):
         assert not re.search(banned, ' '.join([action.title, action.why, action.expected_effect] + action.proof), re.I)
+
+
+def test_stock_card_and_action_share_canonical_days_and_rate_after_today_dispatch():
+    # Recent week is faster than the prior week: range endpoints intentionally
+    # differ, but the action and stock card must show the same canonical count.
+    brand = dict(id='rice', name='India Gate Basmati', rice_type='Basmati',
+                 stock_kg=1050, reorder_level_kg=None, created='2026-09-01')
+    movements = [dict(id=f'm-{n}', brand_id='rice', kind='out',
+                      kg=250 if n < 7 else 210,
+                      date=(TODAY - timedelta(days=n)).isoformat(), note='')
+                 for n in range(14)]
+    facts = analyze([brand], movements, TODAY)
+    snapshot = facts.model_dump()
+    current = facts.brands[0]
+    assert current.avg_daily_out_kg == 230
+    assert current.days_left == 4
+    assert current.days_left_high == 4
+    action = recommend(facts, STORY)[0]
+    assert action.why == 'India Gate Basmati has about 4 days left at the recent pace.'
+    assert f'days left = {current.days_left}' in ' '.join(action.proof)
+    assert f'each day in kg = {current.avg_daily_out_kg}' in ' '.join(action.proof)
+    assert 'faster pace' not in ' '.join(action.proof)
+    assert 'slower pace' not in ' '.join(action.proof)
+    assert facts.model_dump() == snapshot
+    # Earlier snapshot really does differ. Advice must use the current full
+    # movement list, never a stale or differently dated state.
+    before = analyze([brand], movements[1:], TODAY)
+    assert before.brands[0].avg_daily_out_kg != current.avg_daily_out_kg
+
+
+def test_range_does_not_replace_canonical_days_in_action():
+    brand = dict(id='rice', name='Rice', rice_type='Raw', stock_kg=60,
+                 reorder_level_kg=None, created='2026-09-01')
+    movements = [dict(id=str(n), brand_id='rice', kind='out',
+                      kg=20 if n < 7 else 10,
+                      date=(TODAY - timedelta(days=n)).isoformat(), note='')
+                 for n in range(14)]
+    facts = analyze([brand], movements, TODAY)
+    current = facts.brands[0]
+    assert (current.days_left, current.days_left_low, current.days_left_high) == (4, 3, 4)
+    assert recommend(facts, STORY)[0].why == 'Rice has about 4 days left at the recent pace.'
