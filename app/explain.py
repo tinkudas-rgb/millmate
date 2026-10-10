@@ -3,7 +3,7 @@ import json
 import logging
 
 from . import llm
-from .grounding import Pool, claim_ok, kg, merge, sentences, text_ok
+from .grounding import Pool, claim_ok, covered_ok, kg, merge, sentences, text_ok
 from .schemas import Claim, Story
 
 log = logging.getLogger(__name__)
@@ -13,7 +13,8 @@ SYSTEM = (
     "Use ONLY the numbers in FACTS. Never calculate, round differently, or invent a number. "
     "Write numbers as digits with no 'k', 'lakh' or 'crore' (say 1200 kg, not 1.2k). Do not mention dates. "
     "Never use these words: forecast, model, algorithm, API, CSV, database, dataset, anomaly, KPI, regression, token. "
-    "Say 'about X to Y days' for ranges. "
+    "Say 'about X to Y days' for ranges and 'sold per day' for daily sales. "
+    "You cannot send, order or request anything; at most say a note is ready for the owner to copy. "
     'Reply as JSON: {"headline": str, "summary": str (2-4 short sentences), '
     '"claims": [{"text": str (one sentence containing exactly one number), "fact_id": str (a key from FACTS)}]}. '
     "Every number in the headline and summary must also be in a claim."
@@ -104,16 +105,6 @@ def explain(facts, extra: dict | None = None, notes: list[str] | None = None,
                             json=True, timeout=timeout)["content"])
         head = str(d.get("headline", "")).strip()
         sents = sentences(str(d.get("summary", "")))
-        good = [s for s in sents if text_ok(s, pool)]
-        if not sents or len(good) * 2 < len(sents):
-            log.info("story dropped: too many sentences did not match the facts")
-            return template, False
-        clean = True
-        if not head or not text_ok(head, pool):
-            head, clean = headline, False
-        if len(good) < len(sents):
-            clean = False
-            good = merge(good, tsents, [b.name for b in facts.brands])
         claims = []
         for c in d.get("claims", []) if isinstance(d.get("claims"), list) else []:
             try:
@@ -122,6 +113,16 @@ def explain(facts, extra: dict | None = None, notes: list[str] | None = None,
                 continue
             if claim_ok(t, f, pool):
                 claims.append(Claim(text=t, fact_id=f))
+        good = [x for x in sents if text_ok(x, pool) and covered_ok(x, pool, claims)]
+        if not sents or len(good) * 2 < len(sents):
+            log.info("story dropped: too many sentences did not match the facts")
+            return template, False
+        clean = True
+        if not head or not text_ok(head, pool) or not covered_ok(head, pool, claims):
+            head, clean = headline, False
+        if len(good) < len(sents):
+            clean = False
+            good = merge(good, tsents, [b.name for b in facts.brands])
         if not claims:
             claims, clean = tclaims, False
         return Story(headline=head, summary=" ".join(good), claims=claims), clean
