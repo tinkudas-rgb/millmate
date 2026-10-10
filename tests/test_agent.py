@@ -187,3 +187,31 @@ def test_note_attached_to_real_style_title():
 
 def test_tracing_wrap_noop():
     assert tracing.wrap("c") == "c"
+
+
+def test_thought_signature_sent_back(monkeypatch):
+    b, m = mill()
+    sig = {"google": {"thought_signature": "abc"}}
+    seen = []
+    replies = [{"content": "", "tool_calls": [{"id": "c1", "name": "get_brand",
+                                              "arguments": json.dumps({"name": "Idli Rice"}), "extra_content": sig}]},
+               {"content": "DONE", "tool_calls": []}]
+    monkeypatch.setenv("LLM_API_KEY", "x")
+    def fake(msgs, **k):
+        seen.append(json.loads(json.dumps(msgs)))
+        return replies.pop(0) if replies else text({"headline": "x", "summary": "y", "claims": []})
+    monkeypatch.setattr(llm, "chat", fake)
+    agent.run_watch(b, m, TODAY)
+    asst = [x for x in seen[1] if x["role"] == "assistant"][0]
+    assert asst["tool_calls"][0]["extra_content"] == sig and asst["content"] == ""
+
+
+def test_llm_chat_keeps_extra_content(monkeypatch):
+    from types import SimpleNamespace as N
+    tc = N(id="c1", function=N(name="get_brand", arguments="{}"), extra_content={"google": {"thought_signature": "s"}})
+    msg = N(content=None, tool_calls=[tc])
+    client = N(chat=N(completions=N(create=lambda **k: N(choices=[N(message=msg)]))))
+    monkeypatch.setenv("LLM_API_KEY", "x")
+    monkeypatch.setattr(llm, "_client", lambda t: client)
+    r = llm.chat([{"role": "user", "content": "hi"}])
+    assert r["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == "s"
