@@ -13,7 +13,7 @@ SYSTEM = (
     "Use ONLY the numbers in FACTS. Never calculate, round differently, or invent a number. "
     "Write numbers as digits with no 'k', 'lakh' or 'crore' (say 1200 kg, not 1.2k). Do not mention dates. "
     "Never use these words: forecast, model, algorithm, API, CSV, database, dataset, anomaly, KPI, regression, token. "
-    "Say 'about X to Y days' for ranges and 'sold per day' for daily sales. "
+    "Say 'about X to Y days' using days_left_low and days_left_high whenever both exist, and 'sold per day' for daily sales. "
     "You cannot send, order or request anything; at most say a note is ready for the owner to copy. "
     'Reply as JSON: {"headline": str, "summary": str (2-4 short sentences), '
     '"claims": [{"text": str (one sentence containing exactly one number), "fact_id": str (a key from FACTS)}]}. '
