@@ -28,7 +28,7 @@
       const amount=node('p',num(b.stock_kg),'stock-value');amount.append(node('span',' kg in stock'));info.append(amount);
       let status='Add sales from at least 3 days to see how long your stock may last.',cls='stock-status';
       if(f && f.status!=='no_data') {
-        const range=f.days_left_low!=null&&f.days_left_high!=null?`About ${num(f.days_left_low)} to ${num(f.days_left_high)} days left`:f.days_left_high==null&&f.days_left_low!=null?`At least ${num(f.days_left_low)} days left`:f.days_left!=null?`About ${num(f.days_left)} days left`:'Keep recording your sales';
+        const range=f.days_left_low!=null&&f.days_left_high!=null?(num(f.days_left_low)===num(f.days_left_high)?`About ${num(f.days_left_low)} days left`:`About ${num(f.days_left_low)} to ${num(f.days_left_high)} days left`):f.days_left_high==null&&f.days_left_low!=null?`At least ${num(f.days_left_low)} days left`:f.days_left!=null?`About ${num(f.days_left)} days left`:'Keep recording your sales';
         status=f.status==='running_out'?`Needs attention · ${range}`:f.status==='piling_up'?`Moving slowly · ${range}`:`Stock looks steady · ${range}`;
         if(f.status==='running_out')cls+=' urgent';if(f.status==='piling_up')cls+=' slow';
       }
