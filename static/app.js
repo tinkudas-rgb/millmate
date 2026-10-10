@@ -80,7 +80,7 @@
     if(isBrand&&$('reorder-level').value!=='')body.reorder_level_kg=Number($('reorder-level').value);
     if(!isBrand){if($('movement-date').value)body.date=$('movement-date').value;if($('movement-note').value.trim())body.note=$('movement-note').value.trim();}
     lock(true);$('entry-error').hidden=true;let saved=false;
-    try {await post(isBrand?'/api/brands':'/api/movements',body);saved=true;$('entry-dialog').close();text('page-status','Saved. Updating your stock advice...');$('advice').hidden=true;renderState(await request('/api/state'));await watch();text('page-status','Saved. Your stock book is up to date.');}
+    try {await post(isBrand?'/api/brands':'/api/movements',body);saved=true;$('entry-dialog').close();text('page-status','Saved. Updating your stock advice...');$('advice').hidden=true;renderState(await request('/api/state'));lock(false);await watch();text('page-status','Saved. Your stock book is up to date.');}
     catch(err){if(saved){showError('page-error',err,'Your change was saved, but the stock book could not be refreshed. Choose "Check again". Do not save the same change again.');text('page-status','Saved. Please refresh to see the latest stock.');}else if(err.friendly){showError('entry-error',err,'');}else{showError('entry-error',null,'I could not confirm whether this was saved. Close this form and choose "Check again" before entering the same change again.');}}
     finally{lock(false);}
   });
@@ -90,7 +90,7 @@
   $('demo-dialog').addEventListener('cancel',e=>{if(locked)e.preventDefault();});
   $('confirm-demo').addEventListener('click',async()=>{
     if(locked)return;lock(true);$('demo-dialog').close();$('page-error').hidden=true;let saved=false;
-    try{const data=await post('/api/demo',{});saved=true;renderState(data);$('chat-log').replaceChildren();text('page-status','Demo mill loaded. These are example stock records.');await watch();}
+    try{const data=await post('/api/demo',{});saved=true;renderState(data);$('chat-log').replaceChildren();text('page-status','Demo mill loaded. These are example stock records.');lock(false);await watch();}
     catch(e){showError('page-error',e,saved?'The demo loaded, but its stock book could not be shown. Choose "Check again".':'I could not confirm whether the demo loaded. Choose "Check again" before trying again.');}finally{lock(false);}
   });
   $('chat-form').addEventListener('submit',async e=>{
