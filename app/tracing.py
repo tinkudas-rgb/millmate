@@ -22,8 +22,8 @@ def init() -> bool:
         import neatlogs
         neatlogs.init(api_key=key, endpoint=ENDPOINT, workflow_name="rice-mill-advisor")
         _enabled = True
-    except Exception:  # noqa: BLE001  tracing must never break the app
-        log.warning("tracing could not start; continuing without it")
+    except Exception as exc:  # noqa: BLE001  tracing must never break the app
+        log.warning("tracing could not start; continuing without it (%r)", exc)
     return _enabled
 
 
