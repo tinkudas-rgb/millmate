@@ -152,6 +152,8 @@ def answer(question: str, facts, extra: dict | None = None, notes: list[str] | N
         return ChatAnswer(answer=UNCLEAR, claims=[], used_ai=False)
     tsents, tclaims = _template(question, facts, pool)
     template = ChatAnswer(answer=" ".join(tsents), claims=tclaims, used_ai=False)
+    if re.search(r"what if|percent|%", question.lower()) and any(k.endswith(".extra_out_per_day") for k in pool.values):
+        return template  # a what-if with a worked number: use the checked answer, not a rewrite
     if not llm.available():
         return template
     try:
