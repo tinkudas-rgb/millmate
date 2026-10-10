@@ -168,7 +168,7 @@ def test_tracing_noop_and_tools_never_send():
     @tracing.traced("TOOL", "x")
     def f(a): return a + 1
     assert f(1) == 2
-    assert set(agent.TOOLS) == {"get_state", "get_brand", "project_stockout", "compare_brands", "usage_trend", "draft_reorder"}
+    assert set(agent.TOOLS) == {"get_state", "get_brand", "project_stockout", "compare_brands", "usage_trend", "draft_reorder", "needed_stock"}
 
 
 def test_note_attached_to_real_style_title():
@@ -215,3 +215,45 @@ def test_llm_chat_keeps_extra_content(monkeypatch):
     monkeypatch.setattr(llm, "_client", lambda t: client)
     r = llm.chat([{"role": "user", "content": "hi"}])
     assert r["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == "s"
+
+
+def test_bug_a_false_action_claims_dropped(monkeypatch):
+    b, m = mill()
+    for bad in ["I have sent a request to order 840 kg of India Gate Basmati.", "I have requested a restock.",
+                "Your order was placed for India Gate Basmati."]:
+        assert not text_ok(bad, Pool(__import__("app.analytics", fromlist=["x"]).analyze(b, m, TODAY)))
+    keyed(monkeypatch, [{"content": "DONE", "tool_calls": []},
+                        text({"headline": "India Gate Basmati will run out first",
+                              "summary": "India Gate Basmati has 420 kg left. I have sent a request to order more.",
+                              "claims": [{"text": "India Gate Basmati has 420 kg left.", "fact_id": "India Gate Basmati.stock_kg"}]})])
+    adv = agent.run_watch(b, m, TODAY)
+    assert "sent" not in adv.story.summary and adv.used_ai is False
+
+
+def test_bug_b_needed_kg_is_grounded():
+    b, m = mill()   # India Gate sells 60 kg a day, 420 in stock
+    a = agent.run_chat("How many kg of India Gate Basmati do I need for 30 days?", b, m, TODAY)
+    assert any(s.tool == "needed_stock" for s in a.agent_steps)
+    assert "1,800 kg" in a.answer and "1,380 kg more" in a.answer and "sold per day" in a.answer
+    assert "60.0 kg" in a.answer and "output" not in a.answer
+    assert {c.fact_id for c in a.claims} >= {"needed.India Gate Basmati.need_kg", "India Gate Basmati.avg_daily_out_kg"}
+    w = agent.run_chat("do I have enough India Gate for 2 weeks?", b, m, TODAY)
+    assert "840 kg" in w.answer
+
+
+def test_bug_b_unseen_number_dropped(monkeypatch):
+    b, m = mill()
+    # 60 kg per day exists in the facts but the answer must also cite it in a claim, else the sentence is dropped
+    keyed(monkeypatch, [{"content": "DONE", "tool_calls": []},
+                        text({"answer": "India Gate Basmati has 420 kg in stock. Average daily output is 60 kg.",
+                              "claims": [{"text": "India Gate Basmati has 420 kg in stock.", "fact_id": "India Gate Basmati.stock_kg"}]})])
+    a = agent.run_chat("how is india gate?", b, m, TODAY)
+    assert "output" not in a.answer and not (a.used_ai and "60" in a.answer)
+
+
+def test_tool_needed_stock_values():
+    b, m = mill()
+    from app import analytics
+    run = agent.Run(analytics.analyze(b, m, TODAY), m, TODAY)
+    r = agent.needed_stock(run, "India Gate Basmati", 30)
+    assert r["facts"]["needed.India Gate Basmati.need_kg"] == 1800 and r["facts"]["needed.India Gate Basmati.shortfall_kg"] == 1380
