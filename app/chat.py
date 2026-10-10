@@ -4,7 +4,7 @@ import logging
 import re
 
 from . import llm
-from .explain import _parse
+from .explain import _days_text, _parse
 from .grounding import Pool, claim_ok, covered_ok, find_brands, kg, merge, sentences, text_ok
 from .schemas import ChatAnswer, Claim
 
@@ -15,13 +15,22 @@ SYSTEM = (
     "Use ONLY the numbers in FACTS (and numbers the owner typed). Never calculate or invent a number, and never "
     "promise what a price change or discount will do to sales; if the facts cannot answer, say so and say what the "
     "numbers do show. Write numbers as digits with no 'k', 'lakh' or 'crore'. Do not mention dates. "
-    "Say 'sold per day' for daily sales. For 'how much do I need' questions use the needed.* facts, never your own sums. "
+    "Say 'sold per day' for daily sales. When a brand has days_left_low and days_left_high, say 'about LOW to HIGH days' (same as the screen), not one number. For 'how much do I need' questions use the needed.* facts, never your own sums. "
     "You cannot send, order or request anything; at most say a note is ready for the owner to copy. "
     "Never use these words: forecast, model, algorithm, API, CSV, database, dataset, anomaly, KPI, regression, token. "
     'Reply as JSON: {"answer": str, "claims": [{"text": str (one sentence containing exactly one number), '
     '"fact_id": str (a key from FACTS)}]}. Every number in the answer must also be in a claim.'
 )
+KNOWN = re.compile(r"run|out|last|order|buy|restock|stock|pil|slow|much|many|need|enough|day|week|month|kg|sell|sold|"
+                   r"trend|what if|discount|price|total|which|brand|low|left|fast|rice|how|why|when|what|better|worst|best|"
+                   r"reorder|load|supply|hello|hi\b|help", re.I)
+UNCLEAR = ("I did not understand that. Try asking about reordering, or how long a brand will last, "
+           "for example: which brand runs out first?")
 LIMIT = "I can only answer from the stock and sales you have entered."
+
+
+def unclear(question: str, facts) -> bool:
+    return not find_brands(question, [b.name for b in facts.brands]) and not KNOWN.search(question)
 
 
 def _template(question: str, facts, pool: Pool):
@@ -29,6 +38,9 @@ def _template(question: str, facts, pool: Pool):
     names = [b.name for b in facts.brands]
     byname = {b.name: b for b in facts.brands}
     mentioned = find_brands(question, names)
+    if not mentioned:  # what-if without a brand: cover the brand closest to running out first
+        mentioned = sorted((n for n in names if f"projection.{n}.extra_out_per_day" in pool.values),
+                           key=lambda n: (byname[n].days_left is None, byname[n].days_left or 0))
     sents: list[str] = []
     claims: list[Claim] = []
 
@@ -42,37 +54,40 @@ def _template(question: str, facts, pool: Pool):
         nk = f"needed.{n}.need_kg"
         if nk in pool.values:
             nd = pool.values[f"needed.{n}.days"]
-            rate = b.avg_daily_out_kg
-            s = f"For {nd:g} days you would need about {kg(pool.values[nk])} kg"
-            if rate is not None:
-                s += f", at the {rate:,.1f} kg sold per day now"
-                add(f"{n} sells {rate:,.1f} kg per day.", f"{n}.avg_daily_out_kg")
-            sents.append(s + ".")
+            short = pool.values[f"needed.{n}.shortfall_kg"]
+            sents.append(f"For {nd:g} days you need about {kg(pool.values[nk])} kg.")
             add(f"{n} needs about {kg(pool.values[nk])} kg for {nd:g} days.", nk)
-            sents.append(f"You have {kg(b.stock_kg)} kg, so you need about {kg(pool.values[f'needed.{n}.shortfall_kg'])} kg more."
-                         if pool.values[f"needed.{n}.shortfall_kg"] > 0 else f"You have {kg(b.stock_kg)} kg, which already covers it.")
+            if short > 0:
+                sents.append(f"You have {kg(b.stock_kg)} kg, so about {kg(short)} kg more.")
+                add(f"{n} needs about {kg(short)} kg more.", f"needed.{n}.shortfall_kg")
+            else:
+                sents.append(f"You have {kg(b.stock_kg)} kg, which already covers it.")
             add(f"{n} has {kg(b.stock_kg)} kg in stock.", f"{n}.stock_kg")
-            if pool.values[f"needed.{n}.shortfall_kg"] > 0:
-                add(f"{n} needs about {kg(pool.values[f'needed.{n}.shortfall_kg'])} kg more.", f"needed.{n}.shortfall_kg")
+            rate = b.avg_daily_out_kg
+            if rate is not None:
+                sents.append(f"That is based on {rate:,.1f} kg sold per day.")
+                add(f"{n} sells {rate:,.1f} kg per day.", f"{n}.avg_daily_out_kg")
         elif proj in pool.values and f"projection.{n}.extra_out_per_day" in pool.values:
             ex = pool.values[f"projection.{n}.extra_out_per_day"]
             exs = f"{ex:g}"
             s = f"If {exs} kg more goes out each day, {n} would last about {pool.values[proj]} days"
             if b.days_left is not None:
-                s += f", instead of about {b.days_left} days now"
+                s += f", instead of {_days_text(b)[0]} now"
             sents.append(s + ".")
             add(f"{n} would last about {pool.values[proj]} days.", proj)
             if b.days_left is not None:
-                add(f"{n} lasts about {b.days_left} days now.", f"{n}.days_left")
+                for t, k in _days_text(b)[1]:
+                    add(t, k)
         elif b.status == "no_data":
             sents.append(f"I do not know how fast {n} sells yet. Tell me what you sold for a few days and I will work it out.")
         else:
             sents.append(f"{n} has {kg(b.stock_kg)} kg in stock.")
             add(f"{n} has {kg(b.stock_kg)} kg in stock.", f"{n}.stock_kg")
             if b.days_left is not None:
-                s = f"At the current pace it lasts about {b.days_left} days."
-                sents.append(s)
-                add(f"{n} lasts about {b.days_left} days.", f"{n}.days_left")
+                ph, dc = _days_text(b)
+                sents.append(f"At the current pace it lasts {ph}.")
+                for t, k in dc:
+                    add(t, k)
             if f"trend.{n}.total_out_kg" in pool.values:
                 t = pool.values[f"trend.{n}.total_out_kg"]
                 d = pool.values.get(f"trend.{n}.days")
@@ -103,8 +118,10 @@ def _template(question: str, facts, pool: Pool):
                          key=lambda b: (b.days_left is None, b.days_left or 0))
             for b in low[:3]:
                 if b.days_left is not None:
-                    sents.append(f"{b.name} has {kg(b.stock_kg)} kg left, about {b.days_left} days.")
-                    add(f"{b.name} has about {b.days_left} days left.", f"{b.name}.days_left")
+                    ph, dc = _days_text(b)
+                    sents.append(f"{b.name} has {kg(b.stock_kg)} kg left, {ph}.")
+                    for t, k in dc:
+                        add(t, k)
                 else:
                     sents.append(f"{b.name} has {kg(b.stock_kg)} kg left, which is at or below your reorder level.")
                     add(f"{b.name} has {kg(b.stock_kg)} kg left.", f"{b.name}.stock_kg")
@@ -131,6 +148,8 @@ def answer(question: str, facts, extra: dict | None = None, notes: list[str] | N
         pool.add(k, v)
     for i, s in enumerate(re.findall(r"\d+(?:,\d{3})*(?:\.\d+)?", question)):
         pool.add(f"question.number_{i + 1}", float(s.replace(",", "")))  # numbers the owner typed
+    if unclear(question, facts):
+        return ChatAnswer(answer=UNCLEAR, claims=[], used_ai=False)
     tsents, tclaims = _template(question, facts, pool)
     template = ChatAnswer(answer=" ".join(tsents), claims=tclaims, used_ai=False)
     if not llm.available():
