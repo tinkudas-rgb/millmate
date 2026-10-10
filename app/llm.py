@@ -24,12 +24,12 @@ def _client(timeout: float):
         raise LLMUnavailable("openai package missing") from e
     base = os.environ.get("LLM_BASE_URL", "").strip() or DEFAULT_BASE
     from .tracing import wrap
-    return wrap(OpenAI(api_key=key, base_url=base, timeout=timeout, max_retries=1))
+    return wrap(OpenAI(api_key=key, base_url=base, timeout=timeout, max_retries=0))
 
 
 def chat(messages: list, tools: list | None = None, json: bool = False, timeout: float = 20.0) -> dict:
     """One chat-completions call. Returns {"content": str, "tool_calls": [{"id","name","arguments"}]}."""
-    client = _client(min(20.0, max(1.0, timeout)))
+    client = _client(min(10.0, max(1.0, timeout)))
     kw = {"model": os.environ.get("LLM_MODEL", "").strip() or DEFAULT_MODEL,
           "messages": messages, "temperature": 0.2, "max_tokens": 1500}
     if tools:
