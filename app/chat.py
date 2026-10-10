@@ -5,7 +5,7 @@ import re
 
 from . import llm
 from .explain import _parse
-from .grounding import Pool, claim_ok, find_brands, kg, merge, sentences, text_ok
+from .grounding import Pool, claim_ok, covered_ok, find_brands, kg, merge, sentences, text_ok
 from .schemas import ChatAnswer, Claim
 
 log = logging.getLogger(__name__)
@@ -15,6 +15,8 @@ SYSTEM = (
     "Use ONLY the numbers in FACTS (and numbers the owner typed). Never calculate or invent a number, and never "
     "promise what a price change or discount will do to sales; if the facts cannot answer, say so and say what the "
     "numbers do show. Write numbers as digits with no 'k', 'lakh' or 'crore'. Do not mention dates. "
+    "Say 'sold per day' for daily sales. For 'how much do I need' questions use the needed.* facts, never your own sums. "
+    "You cannot send, order or request anything; at most say a note is ready for the owner to copy. "
     "Never use these words: forecast, model, algorithm, API, CSV, database, dataset, anomaly, KPI, regression, token. "
     'Reply as JSON: {"answer": str, "claims": [{"text": str (one sentence containing exactly one number), '
     '"fact_id": str (a key from FACTS)}]}. Every number in the answer must also be in a claim.'
@@ -37,7 +39,22 @@ def _template(question: str, facts, pool: Pool):
     for n in mentioned[:2]:
         b = byname[n]
         proj = f"projection.{n}.days_left"
-        if proj in pool.values and f"projection.{n}.extra_out_per_day" in pool.values:
+        nk = f"needed.{n}.need_kg"
+        if nk in pool.values:
+            nd = pool.values[f"needed.{n}.days"]
+            rate = b.avg_daily_out_kg
+            s = f"For {nd:g} days you would need about {kg(pool.values[nk])} kg"
+            if rate is not None:
+                s += f", at the {rate:,.1f} kg sold per day now"
+                add(f"{n} sells {rate:,.1f} kg per day.", f"{n}.avg_daily_out_kg")
+            sents.append(s + ".")
+            add(f"{n} needs about {kg(pool.values[nk])} kg for {nd:g} days.", nk)
+            sents.append(f"You have {kg(b.stock_kg)} kg, so you need about {kg(pool.values[f'needed.{n}.shortfall_kg'])} kg more."
+                         if pool.values[f"needed.{n}.shortfall_kg"] > 0 else f"You have {kg(b.stock_kg)} kg, which already covers it.")
+            add(f"{n} has {kg(b.stock_kg)} kg in stock.", f"{n}.stock_kg")
+            if pool.values[f"needed.{n}.shortfall_kg"] > 0:
+                add(f"{n} needs about {kg(pool.values[f'needed.{n}.shortfall_kg'])} kg more.", f"needed.{n}.shortfall_kg")
+        elif proj in pool.values and f"projection.{n}.extra_out_per_day" in pool.values:
             ex = pool.values[f"projection.{n}.extra_out_per_day"]
             exs = f"{ex:g}"
             s = f"If {exs} kg more goes out each day, {n} would last about {pool.values[proj]} days"
@@ -59,7 +76,7 @@ def _template(question: str, facts, pool: Pool):
             if f"trend.{n}.total_out_kg" in pool.values:
                 t = pool.values[f"trend.{n}.total_out_kg"]
                 d = pool.values.get(f"trend.{n}.days")
-                sents.append(f"You sent out {kg(t)} kg in the last {d:g} days.")
+                sents.append(f"{kg(t)} kg went out in the last {d:g} days.")
                 add(f"{n} went out {kg(t)} kg in the last {d:g} days.", f"trend.{n}.total_out_kg")
         rk = f"reorder.{n}.kg"
         if rk in pool.values:
@@ -125,12 +142,6 @@ def answer(question: str, facts, extra: dict | None = None, notes: list[str] | N
         d = _parse(llm.chat([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
                             json=True, timeout=timeout)["content"])
         sents = sentences(str(d.get("answer", "")))
-        good = [s for s in sents if text_ok(s, pool)]
-        if not sents or len(good) * 2 < len(sents):
-            return template
-        clean = len(good) == len(sents)
-        if not clean:
-            good = merge(good, tsents, [b.name for b in facts.brands])
         claims = []
         for c in d.get("claims", []) if isinstance(d.get("claims"), list) else []:
             try:
@@ -139,6 +150,12 @@ def answer(question: str, facts, extra: dict | None = None, notes: list[str] | N
                 continue
             if claim_ok(t, f, pool):
                 claims.append(Claim(text=t, fact_id=f))
+        good = [x for x in sents if text_ok(x, pool) and covered_ok(x, pool, claims)]
+        if not sents or len(good) * 2 < len(sents):
+            return template
+        clean = len(good) == len(sents)
+        if not clean:
+            good = merge(good, tsents, [b.name for b in facts.brands])
         if not claims and re.search(r"\d", " ".join(good)):
             return template
         return ChatAnswer(answer=" ".join(good), claims=claims, used_ai=clean)
