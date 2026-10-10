@@ -273,9 +273,13 @@ def _llm_plan(run: Run, user: str):
         reply = llm.chat(msgs, tools=TOOL_SPECS, timeout=run.left() - 5)
         if not reply["tool_calls"]:
             return
-        msgs.append({"role": "assistant", "content": reply["content"] or None, "tool_calls": [
-            {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"]}}
-            for c in reply["tool_calls"]]})
+        calls_out = []
+        for c in reply["tool_calls"]:
+            tc = {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"]}}
+            if c.get("extra_content"):
+                tc["extra_content"] = c["extra_content"]   # thought_signature: send back unchanged
+            calls_out.append(tc)
+        msgs.append({"role": "assistant", "content": reply["content"], "tool_calls": calls_out})
         for c in reply["tool_calls"]:
             try:
                 args = json.loads(c["arguments"] or "{}")
