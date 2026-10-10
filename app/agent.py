@@ -95,7 +95,7 @@ def get_brand(run: Run, name: str) -> dict:
         return _missing(name)
     facts = {f"{b.name}.{f}": getattr(b, f) for f in FIELDS if getattr(b, f) is not None}
     s = f"{b.name}: {b.stock_kg:,.0f} kg in stock"
-    s += f", about {b.days_left} days left." if b.days_left is not None else ", not enough sales yet to say how long it lasts."
+    s += f", {explain_mod._days_text(b)[0]} left." if b.days_left is not None else ", not enough sales yet to say how long it lasts."
     return {"ok": True, "summary": s, "status": b.status, "facts": facts}
 
 
@@ -118,7 +118,7 @@ def project_stockout(run: Run, name: str, extra_out_per_day: float = 0) -> dict:
         facts[f"projection.{b.name}.extra_out_per_day"] = round(extra, 1)
         s = f"If {extra:g} kg more goes out each day, {b.name} lasts about {days} days."
     else:
-        s = f"At the usual pace, {b.name} lasts about {days} days."
+        s = f"At the usual pace, {b.name} lasts {explain_mod._days_text(b)[0]}."
     return {"ok": True, "summary": s, "days_left": days, "date": when, "facts": facts}
 
 
@@ -130,7 +130,7 @@ def compare_brands(run: Run) -> dict:
     if not bs:
         return {"ok": True, "summary": "There are no brands to compare yet.", "ranking": []}
     with_days = [b for b in bs if b.days_left is not None]
-    s = (f"Soonest to run out: {with_days[0].name}, about {with_days[0].days_left} days." if with_days
+    s = (f"Soonest to run out: {with_days[0].name}, {explain_mod._days_text(with_days[0])[0]}." if with_days
          else "Not enough sales yet to rank the brands.")
     return {"ok": True, "summary": s, "ranking": rank, "facts": {}}
 
@@ -255,6 +255,24 @@ def _rule_plan_watch(run: Run):
         run.call("draft_reorder", name=w.name)
 
 
+WHATIF = re.compile(r"what if|more|extra|increase|sell|dispatch|per day|a day|daily|discount|offer", re.I)
+
+
+def _closest(run: Run):
+    with_days = [b for b in run.facts.brands if b.days_left is not None]
+    return min(with_days, key=lambda b: b.days_left) if with_days else None
+
+
+def _ensure_whatif(run: Run, question: str):
+    """A what-if with no brand named must cover the brand closest to running out, with the what-if rate applied."""
+    if find_brands(question, [b.name for b in run.facts.brands]):
+        return
+    nums = re.findall(r"\d+(?:,\d{3})*(?:\.\d+)?", question)
+    c = _closest(run)
+    if nums and c and WHATIF.search(question) and not re.search(r"\d+\s*(day|week|month)", question.lower()):
+        run.call("project_stockout", name=c.name, extra_out_per_day=float(nums[0].replace(",", "")))
+
+
 def _rule_plan_chat(run: Run, question: str):
     q = question.lower()
     names = [b.name for b in run.facts.brands]
@@ -278,10 +296,13 @@ def _rule_plan_chat(run: Run, question: str):
         run.call("get_brand", name=n)
     else:
         run.call("compare_brands")
+        _ensure_whatif(run, question)
         if re.search(r"order|buy|restock", q):
             w = _worst(run)
             if w:
                 run.call("draft_reorder", name=w.name)
+        elif extra and WHATIF.search(q):
+            pass
         elif not re.search(r"piling|too much|slow|extra stock", q):
             for n in run.facts.running_out[:2]:
                 run.call("project_stockout", name=n)
@@ -399,7 +420,9 @@ def run_chat(question: str, brands, movements, today: date) -> ChatAnswer:
     facts = analytics.analyze(brands, movements, today)
     run = Run(facts, movements, today)
     run.call("get_state")
-    _plan(run, "The owner asks: " + q, lambda: _rule_plan_chat(run, q))
+    if not chat_mod.unclear(q, facts):
+        _plan(run, "The owner asks: " + q, lambda: _rule_plan_chat(run, q))
+        _ensure_whatif(run, q)
     ans = chat_mod.answer(q, facts, extra=run.extra, notes=run.notes, timeout=max(2.0, run.left() - 1))
     ans.agent_steps = run.steps
     return ans
