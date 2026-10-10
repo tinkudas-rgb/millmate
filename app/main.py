@@ -105,11 +105,8 @@ def _run_watch(refresh: bool = False) -> Advice:
     return answer
 
 def _after_change() -> None:
+    # Saving must be instant. Advice is rebuilt on the next /api/advice call.
     _advice_cache.clear()
-    try:
-        _run_watch(refresh=True)
-    except Exception:  # noqa: BLE001  a change must still save even if advice cannot refresh
-        pass
 
 MAX_KG = 1_000_000.0
 
@@ -187,6 +184,8 @@ def record_movement(payload: MovementCreate):
         datetime.strptime(movement_date, "%Y-%m-%d")
     except ValueError as exc:
         raise FriendlyException("That date does not look right.", "Use year-month-day, such as 2026-10-10.") from exc
+    if movement_date > _today().isoformat():
+        raise FriendlyException("That date is in the future.", "Choose today or an earlier date.")
     _check_kg(payload.kg, "The amount", allow_zero=False)
     payload.note = _check_text(payload.note, "The note", 200)
     try:
