@@ -64,13 +64,16 @@
     finally{lock(false);}
   }
   function openEntry(kind, brand) {
-    if(locked)return;entry={kind,brand};$('entry-form').reset();$('entry-error').hidden=true;
+    if(locked)return;entry={kind,brand};$('entry-form').reset();$('entry-error').hidden=true;text('entry-error','');
     const isBrand=kind==='brand';$('brand-fields').hidden=!isBrand;$('movement-fields').hidden=isBrand;$('brand-name').required=isBrand;$('quantity').min=isBrand?'0':'0.001';
     text('entry-title',isBrand?'Add a brand & stock':kind==='in'?'Add stock':'Record what went out');text('quantity-label',isBrand?'Stock you have now (kg)':kind==='in'?'New load received (kg)':'Sold or dispatched (kg)');text('save-entry',isBrand?'Save brand & stock':kind==='in'?'Save new load':'Save sale / dispatch');text('entry-context',isBrand?'':`${brand.name} · ${num(brand.stock_kg)} kg in stock`);$('entry-dialog').showModal();
   }
   $('add-brand').addEventListener('click',()=>openEntry('brand'));
   $('close-entry').addEventListener('click',()=>{if(!locked)$('entry-dialog').close();});
   $('entry-dialog').addEventListener('cancel',e=>{if(locked)e.preventDefault();});
+  function clearEntryError(){$('entry-error').hidden=true;text('entry-error','');}
+  $('entry-form').addEventListener('input',clearEntryError);
+  $('entry-form').addEventListener('change',clearEntryError);
   $('entry-form').addEventListener('submit',async e=>{
     e.preventDefault();if(locked)return;const kg=Number($('quantity').value),isBrand=entry.kind==='brand';
     if(!Number.isFinite(kg)||kg<0||(!isBrand&&kg<=0))return;
