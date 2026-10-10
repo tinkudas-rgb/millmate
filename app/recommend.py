@@ -25,15 +25,12 @@ def _proof(facts, brand, *fields):
 def _stock_action(facts, brand):
     if brand.status == 'running_out':
         why = f'{brand.name} is getting low. Check the next delivery before promising more stock.'
-        if brand.days_left_low is not None and brand.days_left_high is not None:
-            why = (f'{brand.name} has about {brand.days_left_low} to '
-                   f'{brand.days_left_high} days left at the recent pace.')
-        elif brand.days_left is not None:
+        if brand.days_left is not None:
             why = f'{brand.name} has about {brand.days_left} days left at the recent pace.'
         return Action(
             title=f'Check a new load of {brand.name}', why=why,
             expected_effect='Helps avoid running out before the next load arrives. Confirm the delivery time and amount first.',
-            proof=_proof(facts, brand, 'stock_kg', 'days_left', 'days_left_low', 'days_left_high'),
+            proof=_proof(facts, brand, 'stock_kg', 'avg_daily_out_kg', 'days_left'),
         )
     if brand.status == 'piling_up':
         return Action(
