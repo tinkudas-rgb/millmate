@@ -97,7 +97,7 @@
     catch(e){showError('page-error',e,saved?'The demo loaded, but its stock book could not be shown. Choose "Check again".':'I could not confirm whether the demo loaded. Choose "Check again" before trying again.');}finally{lock(false);}
   });
   $('chat-form').addEventListener('submit',async e=>{
-    e.preventDefault();const question=$('question').value.trim();if(!question||locked||chatBusy)return;
+    e.preventDefault();const question=$('question').value.trim();if(!question||locked)return;if(chatBusy){text('chat-status','One moment, I am still answering your last question. Then press Ask again.');return;}
     const version=revision;chatBusy=true;$('ask').disabled=true;$('chat-error').hidden=true;text('chat-status','Looking at your mill...');
     const add=(who,answer,cls)=>{const m=node('div','',`message ${cls||''}`);m.append(node('strong',who),node('div',answer));$('chat-log').append(m);return m;};
     add('You',question,'owner');$('question').value='';
