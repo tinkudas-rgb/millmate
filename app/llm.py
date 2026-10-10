@@ -39,6 +39,7 @@ def chat(messages: list, tools: list | None = None, json: bool = False, timeout:
     try:
         msg = client.chat.completions.create(**kw).choices[0].message
     except Exception as e:  # noqa: BLE001
+        print(f"LLM call failed: {type(e).__name__} status={getattr(e, 'status_code', None)} {str(e)[:200]}", flush=True)
         raise LLMUnavailable(f"call failed: {type(e).__name__}") from e
     calls = []
     for c in (msg.tool_calls or []):
