@@ -164,6 +164,25 @@ def usage_trend(run: Run, name: str, days: int = 14) -> dict:
             "series": {k: round(v, 1) for k, v in sorted(series.items())}, "facts": facts}
 
 
+@traced("TOOL", "needed_stock")
+def needed_stock(run: Run, name: str, days: int = 30) -> dict:
+    b = run.find(name)
+    if not b:
+        return _missing(name)
+    try:
+        days = min(max(int(float(days)), 1), 365)
+    except (TypeError, ValueError):
+        days = 30
+    rate = b.avg_daily_out_kg
+    if rate is None or rate <= 0:
+        return {"ok": False, "summary": f"I do not have enough sales for {b.name} to say how much you need."}
+    need = round(rate * days, 1)
+    short = round(max(need - b.stock_kg, 0.0), 1)
+    facts = {f"needed.{b.name}.days": days, f"needed.{b.name}.need_kg": need, f"needed.{b.name}.shortfall_kg": short}
+    s = f"{b.name} needs about {need:,.0f} kg for {days} days; you have {b.stock_kg:,.0f} kg, so about {short:,.0f} kg more."
+    return {"ok": True, "summary": s, "facts": facts}
+
+
 def reorder_data(run: Run, b, kg_hint=None):
     """Order size: enough for 3 weeks at the current pace, rounded up to 10 kg. Computed here, never by the AI."""
     rate = b.avg_daily_out_kg
@@ -195,7 +214,7 @@ def draft_reorder(run: Run, name: str, kg: float | None = None) -> dict:
 
 
 TOOLS = {"get_state": get_state, "get_brand": get_brand, "project_stockout": project_stockout,
-         "compare_brands": compare_brands, "usage_trend": usage_trend, "draft_reorder": draft_reorder}
+         "compare_brands": compare_brands, "needed_stock": needed_stock, "usage_trend": usage_trend, "draft_reorder": draft_reorder}
 
 
 def _spec(name, desc, props, req):
@@ -208,6 +227,8 @@ TOOL_SPECS = [
     _spec("get_brand", "Stock and sales facts for one brand.", _N, ["name"]),
     _spec("project_stockout", "How many days a brand lasts, optionally if extra kg go out each day.",
           {**_N, "extra_out_per_day": {"type": "number"}}, ["name"]),
+    _spec("needed_stock", "How many kg a brand needs over N days at the current pace, and how many more kg than in stock.",
+          {**_N, "days": {"type": "integer"}}, ["name"]),
     _spec("compare_brands", "Rank all brands by which runs out first.", {}, []),
     _spec("usage_trend", "Daily kg sold for one brand over recent days.", {**_N, "days": {"type": "integer"}}, ["name"]),
     _spec("draft_reorder", "Write a reorder note for the owner to copy. Never sent.", _N, ["name"]),
@@ -242,7 +263,11 @@ def _rule_plan_chat(run: Run, question: str):
     extra = float(nums[0].replace(",", "")) if nums else 0
     if brands:
         n = brands[0]
-        if extra and re.search(r"what if|more|extra|increase|sell|dispatch|per day|a day|daily|discount|offer", q):
+        dm = re.search(r"(\d+)\s*(day|week|month)", q)
+        if dm and re.search(r"need|enough|require|how (much|many)|last|cover|stock up", q):
+            mult = {"day": 1, "week": 7, "month": 30}[dm.group(2)]
+            run.call("needed_stock", name=n, days=int(dm.group(1)) * mult)
+        elif extra and re.search(r"what if|more|extra|increase|sell|dispatch|per day|a day|daily|discount|offer", q):
             run.call("project_stockout", name=n, extra_out_per_day=extra)
         elif re.search(r"order|buy|need|restock|reload", q):
             run.call("draft_reorder", name=n)
