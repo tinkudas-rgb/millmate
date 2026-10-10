@@ -16,7 +16,7 @@
   }
   const post = (path, body) => request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   function niceDate(value) {const d=new Date(String(value).slice(0,10)+'T12:00:00');return Number.isNaN(d.getTime())?clean(value):d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});}
-  function steps(values) {return (values||[]).map(s=>node('li',s.result_summary || ({get_state:'Read your current stock and recent sales.',get_brand:'Checked the rice brand.',compare_brands:'Compared how your rice brands are moving.',project_stockout:'Checked how long the stock may last.',usage_trend:'Looked at recent stock going out.',draft_reorder:'Prepared a reorder note for you to review.'}[s.tool] || 'Checked your stock details.')));}
+  function steps(values) {return (values||[]).map(s=>node('li',s.result_summary || ({get_state:'Read your current stock and recent sales.',get_brand:'Checked the rice brand.',compare_brands:'Compared how your rice brands are moving.',project_stockout:'Checked how long the stock may last.',usage_trend:'Looked at recent stock going out.',draft_reorder:'Prepared a reorder note for you to review.',needed_stock:'Worked out how much rice you would need.'}[s.tool] || 'Checked your stock details.')));}
   function renderState(next) {
     if(!Array.isArray(next.brands)||!next.facts)throw new Error('incomplete');state=next;revision++;
     const facts=new Map((next.facts.brands||[]).map(f=>[f.brand_id,f]));
