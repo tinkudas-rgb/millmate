@@ -146,14 +146,18 @@ def usage_trend(run: Run, name: str, days: int = 14) -> dict:
         days = 14
     start = run.today - timedelta(days=days - 1)
     series: dict[str, float] = {}
+    def _g(m, k):
+        return m.get(k) if isinstance(m, dict) else getattr(m, k, None)
+
     for m in run.movements:
-        if m.brand_id == b.brand_id and m.kind == "out":
+        if _g(m, "brand_id") == b.brand_id and _g(m, "kind") == "out":
             try:
-                d = date.fromisoformat(m.date[:10])
-            except ValueError:
+                d = date.fromisoformat(str(_g(m, "date"))[:10])
+                kg = float(_g(m, "kg") or 0)
+            except (ValueError, TypeError):
                 continue
             if start <= d <= run.today:
-                series[d.isoformat()] = series.get(d.isoformat(), 0.0) + m.kg
+                series[d.isoformat()] = series.get(d.isoformat(), 0.0) + kg
     if not series:
         return {"ok": True, "summary": f"No sales of {b.name} in the last {days} days.", "series": {}, "facts": {}}
     total = round(sum(series.values()), 1)
