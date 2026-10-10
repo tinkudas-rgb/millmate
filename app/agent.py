@@ -267,6 +267,15 @@ def _closest(run: Run):
     return min(with_days, key=lambda b: b.days_left) if with_days else None
 
 
+def _extra_kg(run: Run, name: str, question: str, num: float) -> float:
+    """Turn '20 percent more' into kg a day using the brand's usual daily sales; plain numbers stay kg."""
+    if re.search(re.escape(f"{num:g}") + r"\s*(%|percent|per cent|pc)", question.lower()):
+        b = run.find(name)
+        rate = getattr(b, "avg_daily_out_kg", None) if b else None
+        return round(rate * num / 100.0, 1) if rate else 0.0
+    return num
+
+
 def _ensure_whatif(run: Run, question: str):
     """A what-if with no brand named must cover the brand closest to running out, with the what-if rate applied."""
     if find_brands(question, [b.name for b in run.facts.brands]):
@@ -274,7 +283,7 @@ def _ensure_whatif(run: Run, question: str):
     nums = re.findall(r"\d+(?:,\d{3})*(?:\.\d+)?", question)
     c = _closest(run)
     if nums and c and WHATIF.search(question) and not re.search(r"\d+\s*(day|week|month)", question.lower()):
-        run.call("project_stockout", name=c.name, extra_out_per_day=float(nums[0].replace(",", "")))
+        run.call("project_stockout", name=c.name, extra_out_per_day=_extra_kg(run, c.name, question, float(nums[0].replace(",", ""))))
 
 
 def _rule_plan_chat(run: Run, question: str):
@@ -290,7 +299,7 @@ def _rule_plan_chat(run: Run, question: str):
             mult = {"day": 1, "week": 7, "month": 30}[dm.group(2)]
             run.call("needed_stock", name=n, days=int(dm.group(1)) * mult)
         elif extra and re.search(r"what if|more|extra|increase|sell|dispatch|per day|a day|daily|discount|offer", q):
-            run.call("project_stockout", name=n, extra_out_per_day=extra)
+            run.call("project_stockout", name=n, extra_out_per_day=_extra_kg(run, n, question, extra))
         elif re.search(r"order|buy|need|restock|reload", q):
             run.call("draft_reorder", name=n)
         elif re.search(r"how fast|trend|moving|selling|week|lately|last", q):
