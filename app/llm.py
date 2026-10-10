@@ -40,8 +40,12 @@ def chat(messages: list, tools: list | None = None, json: bool = False, timeout:
         msg = client.chat.completions.create(**kw).choices[0].message
     except Exception as e:  # noqa: BLE001
         raise LLMUnavailable(f"call failed: {type(e).__name__}") from e
-    calls = [{"id": c.id, "name": c.function.name, "arguments": c.function.arguments or "{}"}
-             for c in (msg.tool_calls or [])]
+    calls = []
+    for c in (msg.tool_calls or []):
+        # Gemini thinking models attach extra_content (thought_signature) to each call; it must be sent back unchanged.
+        extra = getattr(c, "extra_content", None) or (getattr(c, "model_extra", None) or {}).get("extra_content")
+        calls.append({"id": c.id, "name": c.function.name, "arguments": c.function.arguments or "{}",
+                      "extra_content": extra})
     return {"content": msg.content or "", "tool_calls": calls}
 
 
