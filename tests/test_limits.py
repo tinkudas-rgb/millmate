@@ -13,8 +13,8 @@ def test_limits(monkeypatch):
                  {"name": "<img onerror=x>", "stock_kg": 1}, {"name": "C", "stock_kg": 1, "reorder_level_kg": 1e12}]:
         r = c.post("/api/brands", json=body)
         assert r.status_code == 422 and "message" in r.json() and "fix" in r.json(), body
-    assert c.post("/api/brands", json={"name": "QA Ünï çödé 米 🍚 & Co", "stock_kg": 5}).status_code == 200
+    assert c.post("/api/brands", json={"name": "QA Ünï çödé 米 🍚 & Co " + os.urandom(3).hex(), "stock_kg": 5}).status_code == 200
     assert c.get("/api/state").status_code == 200
-    b = c.get("/api/state").json()["brands"][0]["id"]
+    b = c.get("/api/state").json()["brands"][-1]["id"]
     assert c.post("/api/movements", json={"brand_id": b, "kind": "in", "kg": 1e30}).status_code == 422
     assert c.delete(f"/api/brands/{b}").status_code == 200
