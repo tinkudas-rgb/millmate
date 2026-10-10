@@ -4,5 +4,5 @@ pydantic
 python-multipart
 httpx
 openai
-neatlogs
+neatlogs==1.4.26
 requests
