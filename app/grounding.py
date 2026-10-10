@@ -3,7 +3,9 @@ import re
 
 BANNED = re.compile(
     r"\b(forecasts?|models?|algorithms?|apis?|csv|databases?|datasets?|anomal(?:y|ies)|kpis?|"
-    r"regressions?|tokens?|confidence intervals?|yoy|wow)\b", re.I)
+    r"regressions?|tokens?|outputs?|confidence intervals?|yoy|wow|"
+    # nothing is ever sent or ordered: the AI may only say a note is ready
+    r"sent|requested|ordered|placed|booked|emailed|texted|messaged|contacted|notified)\b", re.I)
 NUM = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
 ISO = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 SCALED = re.compile(r"^\s*(?:k\b|m\b|lakhs?\b|crores?\b|thousand\b|million\b)", re.I)
@@ -131,3 +133,16 @@ def merge(kept: list[str], template: list[str], names: list[str]) -> list[str]:
         if (mentioned and not any(n.lower() in covered for n in mentioned)) or (not mentioned and not kept):
             out.append(t)
     return out
+
+
+def covered_ok(text: str, pool: Pool, claims) -> bool:
+    """Every number in text must be backed by a verified claim (so it shows up under 'show me the numbers'),
+    or be a number the owner typed."""
+    cands = []
+    for c in claims:
+        v = pool.values.get(c.fact_id)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            cands.append(float(v))
+    cands += [float(v) for k, v in pool.values.items() if k.startswith("question.")]
+    strings = {pool.values[c.fact_id] for c in claims if isinstance(pool.values.get(c.fact_id), str)}
+    return _numbers_ok(text, pool, cands, strings)
