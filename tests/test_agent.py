@@ -257,3 +257,45 @@ def test_tool_needed_stock_values():
     run = agent.Run(analytics.analyze(b, m, TODAY), m, TODAY)
     r = agent.needed_stock(run, "India Gate Basmati", 30)
     assert r["facts"]["needed.India Gate Basmati.need_kg"] == 1800 and r["facts"]["needed.India Gate Basmati.shortfall_kg"] == 1380
+
+
+def mill_range():
+    b, m = mill()
+    # India Gate: faster in the last 7 days than in the 14-day average -> a real range
+    for i in range(7):
+        m.append(Movement(id=f"x{i}", brand_id="b1", kind="out", kg=20, date=(TODAY - timedelta(days=i)).isoformat()))
+    return b, m
+
+
+def test_fix1_what_if_without_brand_covers_closest():
+    b, m = mill()
+    a = agent.run_chat("what if I sell 30 kg more a day?", b, m, TODAY)
+    assert "India Gate Basmati would last about 4 days" in a.answer
+    assert any(s.tool == "project_stockout" and s.args.get("name") == "India Gate Basmati" for s in a.agent_steps)
+
+
+def test_fix2_gibberish():
+    b, m = mill()
+    a = agent.run_chat("asdfghjkl qwerty zzz", b, m, TODAY)
+    assert a.answer.startswith("I did not understand that") and "reorder" in a.answer and "note you can copy" not in a.answer
+    assert a.claims == [] and a.used_ai is False
+
+
+def test_fix3_needed_wording_leads_with_the_answer():
+    b, m = mill()
+    a = agent.run_chat("How many kg of India Gate Basmati do I need for 30 days?", b, m, TODAY)
+    assert a.answer.startswith("For 30 days you need about 1,800 kg. You have 420 kg, so about 1,380 kg more.")
+
+
+def test_fix4_range_matches_screen():
+    b, m = mill_range()
+    from app import analytics
+    f = analytics.analyze(b, m, TODAY)
+    ig = f.brands[0]
+    assert ig.days_left_low != ig.days_left_high
+    rng = f"about {ig.days_left_low} to {ig.days_left_high} days"
+    a = agent.run_chat("how long will India Gate last?", b, m, TODAY)
+    assert rng in a.answer
+    ids = {c.fact_id for c in a.claims}
+    assert "India Gate Basmati.days_left_low" in ids and "India Gate Basmati.days_left_high" in ids
+    assert rng in agent.run_watch(b, m, TODAY).story.summary or rng in agent.run_chat("which runs out first", b, m, TODAY).answer
